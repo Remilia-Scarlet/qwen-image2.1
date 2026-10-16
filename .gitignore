@@ -1,0 +1,19 @@
+.venv/
+.hf/
+__pycache__/
+*.pyc
+
+# Local credentials
+.env
+.env.*
+
+# Generated images and logs
+/*.png
+/result/
+/candidates/
+*.log
+
+# Temporary API debugging artifacts
+/datauri.txt
+/openapi.json
+/resp_*.json

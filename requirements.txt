@@ -1,0 +1,5 @@
+transformers>=5.17
+accelerate
+pillow
+safetensors
+git+https://github.com/huggingface/diffusers
