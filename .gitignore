@@ -7,13 +7,6 @@ __pycache__/
 .env
 .env.*
 
-# Generated images and logs
-/*.png
-/result/
-/candidates/
-*.log
 
-# Temporary API debugging artifacts
-/datauri.txt
-/openapi.json
-/resp_*.json
+# Local quantized model files (download via download_gguf.bat)
+/gguf/
