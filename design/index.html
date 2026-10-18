@@ -136,11 +136,8 @@
           <div class="preview-details">
           <div class="execution-panel">
             <div class="execution-heading"><h3>执行轨迹 <span>PIPELINE</span></h3><span class="execution-status" id="execution-status" role="status" aria-live="polite">等待开始</span></div>
-            <div class="pipeline-track">
-              <div class="pipeline-phase" id="encoder-phase"><span class="track-node">01</span><div><strong>文本编码</strong><span id="encoder-summary">Sequential</span></div><span class="phase-time" id="encoder-time">—</span></div>
-              <span class="track-connector"><svg class="icon"><use href="#i-arrow"/></svg></span>
-              <div class="pipeline-phase" id="dit-phase"><span class="track-node">02</span><div><strong>8 步图像迭代</strong><span id="dit-summary">Q8 · 显存常驻</span></div><span class="phase-time" id="dit-time">—</span></div>
-            </div>
+            <div class="pipeline-track" id="pipeline-track"></div>
+            <div class="pipeline-detail" id="pipeline-detail">等待开始</div>
             <div class="progress-line"><span id="progress-fill"></span></div>
             <div class="execution-bottom"><span id="execution-detail">编码 → 8 步迭代 → VAE 解码与保存</span><span id="progress-value">0 / 8</span></div>
           </div>

@@ -301,11 +301,14 @@ class InferenceEngine:
         def forward(*args, **kwargs):
             self._check_cancel()
             if not self._job["denoising_started"]:
-                self._emit("denoising", step=0)
+                self._emit("denoising", step=0, step_started=None)
                 notice = self._activate("transformer")
                 if notice:
                     self._emit("denoising", detail=notice)
                 self._job["denoising_started"] = True
+                self._job["step_clock"] = time.perf_counter()
+            self._job["step_started"] = time.time()
+            self._emit("denoising", step_started=self._job["step_started"])
             with self._timed("denoising"):
                 result = original_forward(*args, **kwargs)
             self._check_cancel()
@@ -321,7 +324,12 @@ class InferenceEngine:
                     self._check_cancel()
                     if phase == "decoding":
                         self._park("transformer")
-                    self._emit(phase)
+                    if phase == "reference_encoding":
+                        self._job["reference_index"] += 1
+                        self._emit(phase, reference_index=self._job["reference_index"],
+                                   reference_total=self._job["reference_count"])
+                    else:
+                        self._emit(phase)
                     try:
                         with self._timed(phase):
                             result = original(*args, **kwargs)
@@ -378,7 +386,8 @@ class InferenceEngine:
                       f"{(weight_bytes + headroom) / gib:.2f} GiB, free {free / gib:.2f} GiB. "
                       f"Continuing anyway; if this fails, select {strategy}='sequential' or reduce "
                       f"batch/resolution.")
-        module.to("cuda")
+        with self._timed(f"{'encoder' if name == 'text_encoder' else 'dit'}_load"):
+            module.to("cuda")
         self._resident_active.add(name)
         self._check_cancel()
         return notice
@@ -386,7 +395,8 @@ class InferenceEngine:
     def _park(self, name):
         if name not in self._resident_active:
             return
-        getattr(self._pipe, name).to("cpu")
+        with self._timed(f"{'encoder' if name == 'text_encoder' else 'dit'}_park"):
+            getattr(self._pipe, name).to("cpu")
         self._resident_active.remove(name)
         self._empty_cache()
 
@@ -485,7 +495,9 @@ class InferenceEngine:
             self._job = {"cancel": cancel_event, "on_event": on_event, "batch_index": 1,
                          "batches": (request.count + batch - 1) // batch, "count": request.count,
                          "completed": 0, "timings": {}, "effective": effective, "area": area,
-                         "denoising_started": False}
+                         "denoising_started": False, "reference_count": len(references),
+                         "reference_index": 0, "step_times": [], "step_clock": None,
+                         "step_started": None}
             pipe = results = None
             failure = None
             try:
@@ -515,7 +527,12 @@ class InferenceEngine:
 
                 def step_callback(callback_pipe, index, timestep, kwargs):
                     self._check_cancel()
-                    self._emit("denoising", step=index + 1)
+                    now = time.perf_counter()
+                    started = self._job["step_clock"] or now
+                    self._job["step_clock"] = now
+                    self._job["step_times"].append(now - started)
+                    self._emit("denoising", step=index + 1, step_time=now - started,
+                               step_times=list(self._job["step_times"]))
                     self._check_cancel()
                     return {}
 
@@ -523,6 +540,9 @@ class InferenceEngine:
                     self._check_cancel()
                     self._job["batch_index"] = start // batch + 1
                     self._job["denoising_started"] = False
+                    self._job["reference_index"] = 0
+                    self._job["step_times"] = []
+                    self._job["step_clock"] = None
                     chunk = min(batch, request.count - start)
                     seeds = [request.seed + start + offset for offset in range(chunk)]
                     generators = [torch.Generator(self._device).manual_seed(seed) for seed in seeds]

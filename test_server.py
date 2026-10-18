@@ -97,12 +97,21 @@ class FakeEngine:
             effective = {"model": request.model, "encoder_strategy": request.encoder_strategy,
                          "dit_strategy": request.dit_strategy, "batch": min(request.batch, request.count), "steps": 8}
             timings = {"encoding": 0.01, "denoising": 0.02}
+            batches = (request.count + effective["batch"] - 1) // effective["batch"]
             records = []
             for phase in ("loading", "encoding", "reference_encoding", "denoising", "decoding", "saving"):
-                on_event({"phase": phase, "detail": phase, "batch_index": 1,
-                          "batches": (request.count + effective["batch"] - 1) // effective["batch"],
-                          "steps": 8, "step": 8 if phase == "denoising" else 0, "count": request.count,
-                          "timings": timings, "effective": effective})
+                event = {"phase": phase, "detail": phase, "batch_index": 1, "batches": batches,
+                         "steps": 8, "step": 8 if phase == "denoising" else 0, "count": request.count,
+                         "timings": timings, "effective": effective}
+                if phase == "denoising":
+                    event.update(step_time=0.08, step_times=[0.1, 0.09, 0.08], step_started=123.5)
+                elif phase == "reference_encoding":
+                    event.update(reference_index=len(references), reference_total=len(references))
+                on_event(event)
+            if batches > 1:
+                on_event({"phase": "denoising", "detail": "second batch", "batch_index": 2, "batches": batches,
+                          "steps": 8, "step": 1, "count": request.count, "timings": timings,
+                          "effective": effective, "step_time": 0.4, "step_times": [0.4], "step_started": 124.0})
             for index in range(request.count):
                 output_id = f"{index + 1:04d}"
                 seed = request.seed + index
@@ -394,6 +403,21 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(snapshot["effective"]["steps"], 8)
         self.assertEqual(snapshot["timings"]["encoding"], 0.01)
 
+    def test_step_times_and_reference_annotations_passthrough_and_batch_reset(self):
+        status, queued, _ = self.submit(config={"batch": 1, "count": 2},
+                                        references=[reference(), reference()])
+        self.assertEqual(status, 202)
+        snapshot = self.wait(queued["id"])
+        self.assertEqual(snapshot["status"], "completed")
+        self.assertEqual(snapshot["batches"], 2)
+        self.assertEqual(snapshot["batch_index"], 2)
+        self.assertEqual(snapshot["step"], 8)
+        self.assertEqual(snapshot["step_time"], 0.4)
+        self.assertEqual(snapshot["step_times"], [0.4])
+        self.assertEqual(snapshot["step_started"], 124.0)
+        self.assertEqual(snapshot["reference_index"], 2)
+        self.assertEqual(snapshot["reference_total"], 2)
+
     def test_missing_model_or_device_rejected_without_generation(self):
         self.engine.available = False
         self.assert_error(self.submit(references=[reference()]), 503)
@@ -409,8 +433,9 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 202)
         self.assertRegex(queued["id"], r"^[0-9a-f]{32}$")
         self.assertEqual(queued["status"], "queued")
-        expected = {"id", "status", "phase", "detail", "batch_index", "batches", "step", "steps", "completed",
-                    "count", "elapsed_seconds", "timings", "outputs", "config", "effective", "error", "cancel_requested"}
+        expected = {"id", "status", "phase", "detail", "batch_index", "batches", "step", "steps", "step_time",
+                    "step_times", "step_started", "reference_index", "reference_total", "completed", "count",
+                    "elapsed_seconds", "timings", "outputs", "config", "effective", "error", "cancel_requested"}
         self.assertEqual(set(queued), expected)
         snapshot = self.wait(queued["id"])
         self.assertEqual(snapshot["status"], "completed")

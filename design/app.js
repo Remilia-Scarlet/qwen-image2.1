@@ -168,10 +168,9 @@ function updateConfiguration() {
     : "请填写有效的每批张数和总生成张数。";
   $("generate-count").textContent = `${validCount ? config.count : "—"} 张`;
   $("strategy-notice").querySelector("span").textContent = `${q8 ? "Q8 仅替换 DiT，文本编码器仍使用官方 Turbo。" : "原版 BF16 权重。"} ${residentDit ? "DiT 在 8 步迭代中整模型驻留 GPU，解码前移回 CPU。" : "DiT 按层搬运，解码前移回 CPU。"}`;
-  if (!job) {
-    $("encoder-summary").textContent = residentEncoder ? "显存常驻" : "Sequential";
-    $("dit-summary").textContent = `${q8 ? "Q8" : "BF16"} · ${residentDit ? "显存常驻" : "Sequential"}`;
-  }
+  ensureTrack(references.length > 0);
+  trackSub("encoding", strategyLabel(config.encoder_strategy));
+  trackSub("denoising", `${q8 ? "Q8" : "BF16"} · ${strategyLabel(config.dit_strategy)}`);
   availability();
 }
 
@@ -393,13 +392,244 @@ $("export-config").addEventListener("click", () => {
   notify("已导出配置；参考图仅记录文件名，不包含图片数据。");
 });
 
-function phaseState(id, state, number) {
-  const phase = $(id);
-  phase.classList.toggle("running", state === "running");
-  phase.classList.toggle("complete", state === "complete");
-  const node = phase.querySelector(".track-node");
-  if (state === "complete") node.innerHTML = '<svg class="icon"><use href="#i-check"/></svg>';
-  else node.textContent = number;
+const trackPhases = ["loading", "encoding", "reference_encoding", "denoising", "decoding"];
+const trackTitles = { loading: "权重加载", encoding: "文本编码", reference_encoding: "参考图编码", denoising: "8 步迭代", decoding: "VAE 解码" };
+let trackHasReferences = null;
+let detailState = { phase: null, signature: null, terminal: null, refs: {} };
+let stepTicker = null;
+let stepStartedAt = null;
+
+function formatSeconds(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? `${value.toFixed(1)}s` : "—";
+}
+
+function strategyLabel(value) {
+  return value === "resident" ? "显存常驻" : "Sequential";
+}
+
+function trackPhasesFor(hasReferences) {
+  return trackPhases.filter((phase) => phase !== "reference_encoding" || hasReferences);
+}
+
+function renderTrack(hasReferences) {
+  trackHasReferences = hasReferences;
+  const phases = trackPhasesFor(hasReferences);
+  const track = $("pipeline-track");
+  track.replaceChildren();
+  phases.forEach((phase, index) => {
+    if (index) {
+      const connector = document.createElement("span");
+      connector.className = "track-connector";
+      connector.dataset.connector = phases[index - 1];
+      connector.innerHTML = '<svg class="icon"><use href="#i-arrow"/></svg>';
+      track.append(connector);
+    }
+    const node = document.createElement("div");
+    node.className = "pipeline-phase";
+    node.dataset.phase = phase;
+    node.dataset.number = String(index + 1).padStart(2, "0");
+    const badge = document.createElement("span");
+    badge.className = "track-node";
+    const info = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = trackTitles[phase];
+    const sub = document.createElement("span");
+    sub.className = "phase-sub";
+    info.append(title, sub);
+    const time = document.createElement("span");
+    time.className = "phase-time";
+    node.append(badge, info, time);
+    track.append(node);
+  });
+  resetTrack();
+}
+
+function ensureTrack(hasReferences) {
+  if (trackHasReferences !== hasReferences) renderTrack(hasReferences);
+}
+
+function trackNode(phase) {
+  return document.querySelector(`#pipeline-track .pipeline-phase[data-phase="${phase}"]`);
+}
+
+function trackState(phase, state) {
+  const node = trackNode(phase);
+  if (!node) return;
+  node.classList.toggle("running", state === "running");
+  node.classList.toggle("complete", state === "complete");
+  const badge = node.querySelector(".track-node");
+  const marker = state === "complete" ? "check" : "number";
+  if (badge.dataset.marker !== marker) {
+    badge.dataset.marker = marker;
+    if (marker === "check") badge.innerHTML = '<svg class="icon"><use href="#i-check"/></svg>';
+    else badge.textContent = node.dataset.number;
+  }
+  const phases = trackPhasesFor(trackHasReferences);
+  const index = phases.indexOf(phase);
+  if (index > 0) {
+    const connector = document.querySelector(`#pipeline-track .track-connector[data-connector="${phases[index - 1]}"]`);
+    if (connector) connector.classList.toggle("complete", state !== "idle");
+  }
+}
+
+function trackSub(phase, text) {
+  const node = trackNode(phase);
+  if (node) node.querySelector(".phase-sub").textContent = text;
+}
+
+function trackTime(phase, text) {
+  const node = trackNode(phase);
+  if (node) node.querySelector(".phase-time").textContent = text;
+}
+
+function resetTrack() {
+  ensureTrack(references.length > 0);
+  for (const phase of trackPhasesFor(trackHasReferences)) {
+    trackState(phase, "idle");
+    trackSub(phase, "");
+    trackTime(phase, "—");
+  }
+  const config = editableConfig;
+  trackSub("encoding", strategyLabel(config.encoder_strategy));
+  trackSub("denoising", `${config.model === "q8" ? "Q8" : "BF16"} · ${strategyLabel(config.dit_strategy)}`);
+  const detail = $("pipeline-detail");
+  detail.classList.remove("swap");
+  detail.textContent = "等待开始";
+  detailState = { phase: null, signature: null, terminal: null, refs: {} };
+  stepStartedAt = null;
+  stopStepTicker();
+}
+
+function detailChip(label) {
+  const chip = document.createElement("span");
+  chip.className = "detail-chip";
+  chip.textContent = label;
+  const value = document.createElement("b");
+  value.textContent = "—";
+  chip.append(value);
+  return { chip, value };
+}
+
+function setChip(ref, value) {
+  ref.value.textContent = formatSeconds(value);
+}
+
+function paintStepCells(cells, times, running) {
+  [...cells.children].forEach((cell, index) => {
+    const value = times[index];
+    const done = typeof value === "number" && Number.isFinite(value);
+    const current = running && !done && index === times.length;
+    cell.classList.toggle("done", done);
+    cell.classList.toggle("current", current);
+    cell.replaceChildren();
+    if (done) {
+      cell.innerHTML = '<svg class="icon"><use href="#i-check"/></svg>';
+      const duration = document.createElement("b");
+      duration.textContent = formatSeconds(value);
+      cell.append(duration);
+      cell.title = `第 ${index + 1} 步 ${formatSeconds(value)}${index === 0 ? "（建立 KV 缓存）" : "（复用缓存）"}`;
+    } else if (current) {
+      cell.append(document.createElement("b"));
+      cell.title = `第 ${index + 1} 步进行中`;
+    } else {
+      cell.textContent = String(index + 1);
+      cell.title = "";
+    }
+  });
+  if (running) tickStepTimer();
+}
+
+function stopStepTicker() {
+  clearInterval(stepTicker);
+  stepTicker = null;
+}
+
+function tickStepTimer() {
+  if (typeof stepStartedAt !== "number") return;
+  const cells = detailState.refs.cells;
+  const cell = cells && [...cells.children].find((child) => child.classList.contains("current"));
+  const label = cell && cell.querySelector("b");
+  if (label) label.textContent = formatSeconds(Math.max(0, Date.now() / 1000 - stepStartedAt));
+}
+
+function ensureStepTicker() {
+  if (stepTicker === null) stepTicker = setInterval(tickStepTimer, 100);
+}
+
+function swapDetail(detail) {
+  detail.classList.remove("swap");
+  void detail.offsetWidth;
+  detail.classList.add("swap");
+}
+
+function renderDetail(snapshot, effective) {
+  const phase = snapshot.phase;
+  const running = !terminal.has(snapshot.status);
+  const signature = JSON.stringify([snapshot.status, phase, snapshot.step, snapshot.step_times, snapshot.timings, snapshot.reference_index, snapshot.reference_total]);
+  if (signature === detailState.signature) return;
+  detailState.signature = signature;
+  const detail = $("pipeline-detail");
+  if (!running) {
+    if (detailState.terminal === snapshot.status) return;
+    detailState.phase = null;
+    detailState.terminal = snapshot.status;
+    detailState.refs = {};
+    detail.replaceChildren();
+    const text = document.createElement("span");
+    text.className = "detail-note";
+    text.textContent = snapshot.status === "completed" ? "生成完成" : snapshot.status === "cancelled" ? "已停止" : "生成失败";
+    detail.append(text);
+    swapDetail(detail);
+    return;
+  }
+  detailState.terminal = null;
+  const timings = snapshot.timings || {};
+  const phaseChanged = detailState.phase !== phase;
+  detailState.phase = phase;
+  if (phaseChanged) {
+    detail.replaceChildren();
+    detailState.refs = {};
+    if (phase === "encoding") {
+      const refs = { encoder_load: detailChip("上卡"), encoding: detailChip("编码"), encoder_park: detailChip("下卡") };
+      detailState.refs.chips = refs;
+      detail.append(...Object.values(refs).map((ref) => ref.chip));
+    } else if (phase === "denoising") {
+      const cells = document.createElement("div");
+      cells.className = "step-cells";
+      for (let index = 0; index < 8; index++) {
+        const cell = document.createElement("span");
+        cell.className = "step-cell";
+        cells.append(cell);
+      }
+      const note = document.createElement("span");
+      note.className = "detail-note";
+      const load = detailChip("DiT 上卡");
+      detailState.refs = { cells, note, chips: { dit_load: load } };
+      detail.append(cells, note, load.chip);
+    } else if (phase === "decoding") {
+      const refs = { dit_park: detailChip("DiT 下卡"), decoding: detailChip("解码") };
+      detailState.refs.chips = refs;
+      detail.append(...Object.values(refs).map((ref) => ref.chip));
+    } else {
+      const text = document.createElement("span");
+      text.className = "detail-note";
+      detailState.refs.text = text;
+      detail.append(text);
+    }
+  }
+  const refs = detailState.refs;
+  if (phase === "queued") refs.text.textContent = "等待调度";
+  else if (phase === "loading") refs.text.textContent = "本地权重读盘 · 不可中断";
+  else if (phase === "encoding") for (const [name, ref] of Object.entries(refs.chips)) setChip(ref, timings[name]);
+  else if (phase === "reference_encoding") refs.text.textContent = snapshot.reference_total ? `第 ${Math.max(snapshot.reference_index, 1)} / ${snapshot.reference_total} 张参考图` : "参考图编码中…";
+  else if (phase === "denoising") {
+    const times = Array.isArray(snapshot.step_times) ? snapshot.step_times : [];
+    paintStepCells(refs.cells, times, running);
+    refs.note.textContent = times.length ? `KV 缓存：第 1 步建立，已复用 ${Math.max(0, times.length - 1)} / 7` : "KV 缓存：第 1 步建立";
+    setChip(refs.chips.dit_load, timings.dit_load);
+  } else if (phase === "decoding") for (const [name, ref] of Object.entries(refs.chips)) setChip(ref, timings[name]);
+  else refs.text.textContent = "写入 PNG 与生成元数据";
+  if (phaseChanged) swapDetail(detail);
 }
 
 function renderCandidates() {
@@ -495,12 +725,9 @@ function beginJob(id = null) {
   outputs = [];
   renderCandidates();
   lock(true);
-  $("encoder-time").textContent = "—";
-  $("dit-time").textContent = "—";
   $("progress-fill").style.width = "0%";
   $("progress-value").textContent = "0 / 8";
-  phaseState("encoder-phase", "idle", "01");
-  phaseState("dit-phase", "idle", "02");
+  resetTrack();
   execution(id ? "正在恢复任务" : "正在准备请求", id ? `正在读取任务 ${id}，不会重复提交。` : "正在读取参考图并提交配置。" );
   if (id) {
     rememberJob(id);
@@ -536,27 +763,33 @@ function applyJob(snapshot, token) {
   if (previousLength !== outputs.length) renderCandidates();
   else selection();
   const effective = { ...snapshot.config, ...snapshot.effective };
-  $("encoder-summary").textContent = effective.encoder_strategy === "resident" ? "显存常驻" : "Sequential";
-  $("dit-summary").textContent = `${effective.model === "q8" ? "Q8" : "BF16"} · ${effective.dit_strategy === "resident" ? "显存常驻" : "Sequential"}`;
-  const phases = { queued: "等待调度", loading: "加载模型", encoding: "文本编码中", reference_encoding: "参考图编码中", denoising: "图像迭代中", decoding: "VAE 解码中", saving: "保存图片", completed: "生成完成", cancelled: "已停止", failed: "生成失败" };
+  ensureTrack((snapshot.config?.reference_names || []).length > 0);
+  trackSub("encoding", strategyLabel(effective.encoder_strategy));
+  trackSub("reference_encoding", snapshot.reference_total ? `${snapshot.reference_index} / ${snapshot.reference_total}` : "");
+  trackSub("denoising", `${effective.model === "q8" ? "Q8" : "BF16"} · ${strategyLabel(effective.dit_strategy)} · 批 ${snapshot.batch_index || 1} / ${snapshot.batches || 1}`);
   const done = terminal.has(snapshot.status);
-  const encoding = ["encoding", "reference_encoding"].includes(snapshot.phase);
-  const afterEncoding = ["denoising", "decoding", "saving", "completed"].includes(snapshot.phase);
-  const afterDit = ["decoding", "saving", "completed"].includes(snapshot.phase);
-  phaseState("encoder-phase", encoding && !done ? "running" : afterEncoding ? "complete" : "idle", "01");
-  phaseState("dit-phase", snapshot.phase === "denoising" && !done ? "running" : afterDit ? "complete" : "idle", "02");
-  const seconds = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? `${value.toFixed(1)}s` : "—";
-  $("encoder-time").textContent = seconds(snapshot.timings?.encoding);
-  $("dit-time").textContent = seconds(snapshot.timings?.denoising);
+  const order = trackPhasesFor(trackHasReferences);
+  const current = order.indexOf(snapshot.phase);
+  order.forEach((name, index) => {
+    const complete = (done && snapshot.status === "completed") || snapshot.phase === "saving";
+    const state = complete || index < current ? "complete" : current < 0 ? "idle" : index === current ? (done ? "idle" : "running") : "idle";
+    trackState(name, state);
+    trackTime(name, formatSeconds(snapshot.timings?.[name]));
+  });
+  stepStartedAt = typeof snapshot.step_started === "number" ? snapshot.step_started : null;
+  renderDetail(snapshot, effective);
+  if (!done && snapshot.phase === "denoising") ensureStepTicker();
+  else stopStepTicker();
   const steps = snapshot.steps;
   const step = snapshot.step;
   $("progress-value").textContent = `${step} / ${steps}`;
   const progress = snapshot.batches > 0 && steps > 0 && snapshot.batch_index > 0 ? ((snapshot.batch_index - 1) * steps + step) / (snapshot.batches * steps) : 0;
   $("progress-fill").style.width = `${Math.max(0, Math.min(1, progress)) * 100}%`;
   const timingNames = { encoding: "文本编码", denoising: "迭代", decoding: "解码", reference_encoding: "参考图编码", saving: "保存" };
-  const extraTimings = Object.entries(snapshot.timings || {}).filter(([name, value]) => timingNames[name] && typeof value === "number").map(([name, value]) => `${timingNames[name]} ${seconds(value)}`);
-  const detail = [snapshot.error || snapshot.detail, `已保存 ${outputs.length} / ${snapshot.count} 张`, snapshot.batch_index > 0 ? `第 ${snapshot.batch_index} / ${snapshot.batches} 批` : "", typeof snapshot.elapsed_seconds === "number" ? `耗时 ${seconds(snapshot.elapsed_seconds)}` : "", ...extraTimings].filter(Boolean).join(" · ");
+  const extraTimings = Object.entries(snapshot.timings || {}).filter(([name, value]) => timingNames[name] && typeof value === "number").map(([name, value]) => `${timingNames[name]} ${formatSeconds(value)}`);
+  const detail = [snapshot.error || snapshot.detail, `已保存 ${outputs.length} / ${snapshot.count} 张`, snapshot.batch_index > 0 ? `第 ${snapshot.batch_index} / ${snapshot.batches} 批` : "", typeof snapshot.elapsed_seconds === "number" ? `耗时 ${formatSeconds(snapshot.elapsed_seconds)}` : "", ...extraTimings].filter(Boolean).join(" · ");
   const stopDetail = !done && cancelRequested ? "停止请求已提交，当前操作安全结束后停止。 " : !done && cancelPending ? "正在等待服务确认停止请求。 " : cancelError ? `停止请求未确认：${cancelError} ` : "";
+  const phases = { queued: "等待调度", loading: "加载模型", encoding: "文本编码中", reference_encoding: "参考图编码中", denoising: "图像迭代中", decoding: "VAE 解码中", saving: "保存图片", completed: "生成完成", cancelled: "已停止", failed: "生成失败" };
   const status = !done && cancelRequested ? "正在停止，等待后端" : !done && cancelPending ? "正在请求停止" : !done && cancelError ? "停止请求未确认" : phases[snapshot.phase] || snapshot.status;
   execution(status, `${stopDetail}${detail}`, snapshot.status === "failed" || Boolean(cancelError));
   availability();

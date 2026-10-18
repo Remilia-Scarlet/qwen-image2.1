@@ -224,7 +224,9 @@ class JobManager:
                 batch = min(request.batch, request.count)
                 state = {"id": job_id, "status": "queued", "phase": "queued", "detail": "Waiting for worker",
                          "batch_index": 0, "batches": (request.count + batch - 1) // batch,
-                         "step": 0, "steps": 8, "completed": 0, "count": request.count,
+                         "step": 0, "steps": 8, "step_time": None, "step_times": [], "step_started": None,
+                         "reference_index": 0, "reference_total": 0,
+                         "completed": 0, "count": request.count,
                          "timings": {}, "outputs": [], "config": request.to_dict(), "effective": {},
                          "error": None, "cancel_requested": False}
                 job = _Job(request, references, self.output_dir / job_id, threading.Event(), state, {}, time.monotonic())
@@ -288,7 +290,11 @@ class JobManager:
                 state["detail"] = ""
             if "batch_index" in event and event["batch_index"] != state["batch_index"]:
                 state["step"] = 0
-            for key in ("phase", "detail", "batch_index", "batches", "step", "steps", "count", "timings", "effective"):
+                state["step_time"] = None
+                state["step_times"] = []
+                state["step_started"] = None
+            for key in ("phase", "detail", "batch_index", "batches", "step", "steps", "count", "timings",
+                        "effective", "step_time", "step_times", "step_started", "reference_index", "reference_total"):
                 if key in event:
                     state[key] = copy.deepcopy(event[key])
             if public is not None and public["id"] not in job.paths:

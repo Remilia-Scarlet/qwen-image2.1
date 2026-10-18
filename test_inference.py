@@ -502,7 +502,8 @@ class EngineTests(unittest.TestCase):
         self.engine._device = "cuda"
         self.engine._pipe = self.load_fake(self.source, "q8", "cuda")
         self.engine._strategies = {"transformer": "resident"}
-        self.engine._job = {"cancel": self.cancel, "effective": {"batch": 2}, "area": 1024 ** 2}
+        self.engine._job = {"cancel": self.cancel, "effective": {"batch": 2}, "area": 1024 ** 2,
+                            "timings": {}}
         free = [int(14.43 * 1024 ** 3)]
         patch("torch.cuda.mem_get_info", side_effect=lambda: (free[0], 24 * 1024 ** 3)).start()
         tensor = SimpleNamespace(numel=lambda: int(7.07 * 1024 ** 3), element_size=lambda: 1, is_meta=False)
@@ -516,6 +517,39 @@ class EngineTests(unittest.TestCase):
         notice = self.engine._activate("transformer")
         self.assertIn("Insufficient VRAM", notice)
         self.assertIn("transformer", self.engine._resident_active)
+
+    def test_low_level_trace_step_times_reference_indices_and_transfer_timings(self):
+        self.use_cuda()
+        request = GenerationRequest("cat", model="q8", encoder_strategy="resident", dit_strategy="resident",
+                                    batch=2, count=3, width=32, height=32)
+        reference = Image.new("RGB", (32, 32))
+        self.run_job(request, [reference, reference])
+        events = self.events
+        steps = [event for event in events if event.get("phase") == "denoising" and event.get("step", 0) >= 1]
+        self.assertEqual([(event["batch_index"], event["step"]) for event in steps],
+                         [(1, step) for step in range(1, 9)] + [(2, step) for step in range(1, 9)])
+        for batch in (1, 2):
+            batch_events = [event for event in steps if event["batch_index"] == batch]
+            self.assertEqual([len(event["step_times"]) for event in batch_events], list(range(1, 9)))
+            for event in batch_events:
+                self.assertAlmostEqual(event["step_times"][-1], event["step_time"], places=9)
+                self.assertGreater(event["step_time"], 0.0)
+            self.assertEqual(len(batch_events[0]["step_times"]), 1)
+        starts = [event["step_started"] for event in events if isinstance(event.get("step_started"), (int, float))]
+        self.assertEqual(len(starts), 16)
+        self.assertEqual(starts, sorted(starts))
+        self.assertTrue(all(value > 0 for value in starts))
+        zero_steps = [event for event in events if event.get("phase") == "denoising" and event.get("step") == 0]
+        self.assertTrue(all(event["step_started"] is None for event in zero_steps))
+        references = [event for event in events if event.get("phase") == "reference_encoding"]
+        self.assertEqual([(event["reference_index"], event["reference_total"]) for event in references],
+                         [(1, 2), (2, 2), (1, 2), (2, 2)])
+        timings = [event for event in events if "timings" in event][-1]["timings"]
+        for key in ("encoder_load", "encoder_park", "encoding", "dit_load", "dit_park",
+                    "reference_encoding", "denoising", "decoding"):
+            self.assertIn(key, timings)
+            self.assertGreaterEqual(timings[key], 0.0)
+        json.dumps(events)
 
     def test_resident_two_batches_release_decode_cache_and_keep_all_outputs(self):
         self.use_cuda()
