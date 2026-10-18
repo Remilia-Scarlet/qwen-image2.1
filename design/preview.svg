@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">等待首次生成</title>
+  <desc id="desc">尚无生成结果。生成完成后，这里将显示服务保存的原始图片。</desc>
+  <defs>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" fill="none" stroke="#1c2938" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1024" height="1024" fill="#0c121a"/>
+  <rect x="32" y="32" width="960" height="960" fill="url(#grid)" stroke="#25384a"/>
+  <g fill="none" stroke="#4ac5dd" stroke-width="3">
+    <path d="M32 88V32h56m848 0h56v56M32 936v56h56m848 0h56v-56"/>
+  </g>
+  <g fill="none" stroke="#49657d" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+    <rect x="420" y="350" width="184" height="148" rx="5"/>
+    <circle cx="462" cy="392" r="12"/>
+    <path d="m420 466 48-42 42 38 38-30 56 47"/>
+  </g>
+  <g text-anchor="middle" font-family="Consolas, Microsoft YaHei, sans-serif">
+    <text x="512" y="605" fill="#d4e1ed" font-size="64" font-weight="600">等待首次生成</text>
+    <text x="512" y="669" fill="#8198ad" font-size="34">生成结果将在这里显示</text>
+    <text x="512" y="766" fill="#4ac5dd" font-size="24" letter-spacing="3">PREVIEW / NO IMAGE LOADED</text>
+  </g>
+  <g fill="#8198ad" font-family="Consolas, monospace" font-size="22" letter-spacing="2">
+    <text x="65" y="92">OUTPUT_BUFFER</text>
+    <text x="65" y="946">STATUS: NO_OUTPUT</text>
+  </g>
+</svg>

@@ -7,16 +7,6 @@ from pathlib import Path
 
 MODEL_ID = "Qwen/Qwen-Image-2.1-Turbo"
 
-RATIO_TO_SIZE = {
-    "1:1": (2048, 2048),
-    "4:3": (2400, 1792),
-    "3:4": (1792, 2400),
-    "3:2": (2528, 1696),
-    "2:3": (1696, 2528),
-    "16:9": (2752, 1536),
-    "9:16": (1536, 2752),
-}
-
 RGBA_PREFIX = (
     "This is an RGBA image with transparency. {prompt} "
     "The image has alpha channel and the background is transparent."
@@ -101,8 +91,6 @@ def parse_args():
     p.add_argument("--prompt", required=True, help="Text prompt / editing instruction.")
     p.add_argument("--image", action="append", default=None,
                    help="Input image path for editing. Repeat up to 10 times for multi-reference.")
-    p.add_argument("--ratio", choices=sorted(RATIO_TO_SIZE), default=None,
-                   help="Aspect ratio preset (2K). Ignored when --width/--height given.")
     p.add_argument("--width", type=int, default=None)
     p.add_argument("--height", type=int, default=None)
     p.add_argument("--steps", type=int, default=40,
@@ -150,11 +138,9 @@ def parse_args():
 def resolve_size(args):
     if args.width and args.height:
         return args.width, args.height
-    if args.ratio:
-        return RATIO_TO_SIZE[args.ratio]
     if args.image:
         return None, None
-    return RATIO_TO_SIZE["1:1"]
+    return 2048, 2048
 
 
 def patch_gguf_meta_offload():
@@ -165,6 +151,8 @@ def patch_gguf_meta_offload():
     from diffusers.quantizers.gguf.utils import GGUFParameter
 
     original_new = GGUFParameter.__new__
+    if getattr(original_new, "_meta_offload_patched", False):
+        return
 
     def __new__(cls, data, requires_grad=False, quant_type=None):
         if quant_type is None and data is not None:
@@ -176,6 +164,7 @@ def patch_gguf_meta_offload():
                 return obj
         return original_new(cls, data, requires_grad=requires_grad, quant_type=quant_type)
 
+    __new__._meta_offload_patched = True
     GGUFParameter.__new__ = staticmethod(__new__)
 
 

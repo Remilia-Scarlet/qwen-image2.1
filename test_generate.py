@@ -46,7 +46,24 @@ class GenerateTests(unittest.TestCase):
         self.pipe.assert_called_once()
         self.torch.Generator.assert_called_once_with("cuda")
         self.assertEqual(self.pipe.call_args.kwargs["generator"], 42)
+        self.assertEqual((self.pipe.call_args.kwargs["width"], self.pipe.call_args.kwargs["height"]),
+                         (2048, 2048))
         self.assertIsNot(self.pipe.processor.image_processor.do_resize, False)
+
+    def test_custom_text_size_is_independent_of_resolution(self):
+        self.run_main("--width", "128", "--height", "256", "--resolution", "1024",
+                      "--output", str(self.root / "custom.png"))
+        kwargs = self.pipe.call_args.kwargs
+        self.assertEqual((kwargs["width"], kwargs["height"]), (128, 256))
+        self.assertEqual(kwargs["output_resolution"], 1024)
+
+    def test_edit_without_size_preserves_auto_dimensions(self):
+        self.run_main("--image", "reference.jpg", "--resolution", "512",
+                      "--output", str(self.root / "auto.png"))
+        kwargs = self.pipe.call_args.kwargs
+        self.assertNotIn("width", kwargs)
+        self.assertNotIn("height", kwargs)
+        self.assertEqual(kwargs["output_resolution"], 512)
 
     def test_ten_images_reuse_model_and_references(self):
         folder = self.root / "candidates"

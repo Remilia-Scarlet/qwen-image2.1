@@ -57,6 +57,16 @@ download_gguf.bat
 
 ## 用法
 
+### 网页控制台
+
+运行 `start_web.bat`，浏览器会打开 `http://127.0.0.1:7860`。控制台使用现有环境和本地 Turbo / Q8 权重，不自动下载或替换模型；`run.bat` 的命令行用法保持不变。
+
+网页版的文本编码和 DiT 策略独立配置。显存常驻只针对组件的执行阶段，阶段结束后移回 CPU，为后续编码、迭代或 VAE 解码腾出显存。
+
+可用 `start_web.bat --port 7861 --no-browser` 更换端口并关闭自动打开浏览器。`--model-dir <本地 Turbo 目录>` 和 `--gguf <本地 GGUF 文件>` 可指定其他权重位置；`--cpu` 仅用于较慢的 CPU 调试。
+
+原始 PNG 保存在 `outputs/<任务编号>/`。接口保留当前会话最近 64 个已结束任务，重启只清除接口历史，不删除图片。停止按钮和 `Ctrl+C` 会等待当前操作到达安全停止点，保留已保存的结果。
+
 用 `run.bat` 运行会自动设置 `HF_HOME` / `HF_ENDPOINT`（国内镜像）+ 激活 venv：
 
 ```bash
@@ -67,10 +77,10 @@ run.bat --prompt "A neon shop sign that reads \"QWEN IMAGE 2.1\", rainy night, r
 
 ### 文生图
 
-指定比例 / 输出：
+指定输出宽高和文件名；不指定尺寸时默认 2048 × 2048：
 
 ```bash
-run.bat --prompt "一只戴宇航头盔的柴犬" --ratio 16:9 --output dog.png
+run.bat --prompt "一只戴宇航头盔的柴犬" --width 2752 --height 1536 --output dog.png
 ```
 
 ### 图像编辑（以图生图）
@@ -190,8 +200,7 @@ run.bat --image a.png --image b.png --prompt "把 <image1> 的主体放进 <imag
 |---|---|
 | `--prompt` | 提示词（必填） |
 | `--image` | 编辑输入图，可重复 |
-| `--ratio` | `1:1 / 4:3 / 3:4 / 3:2 / 2:3 / 16:9 / 9:16` |
-| `--width --height` | 自定义尺寸，优先于 `--ratio` |
+| `--width --height` | 同时指定输出宽高；省略时文生图默认 2048 × 2048，编辑模式自动跟随输入宽高比 |
 | `--resolution` | 输出/条件图边长，默认 2048（编辑跟随输入宽高比） |
 | `--steps` | 推理步数，默认 40（Turbo 固定 8 步，忽略此参数） |
 | `--cfg` | `true_cfg_scale`，默认 1.0（>1 需配负向提示词） |
@@ -206,11 +215,3 @@ run.bat --image a.png --image b.png --prompt "把 <image1> 的主体放进 <imag
 | `--dtype` | `bf16`（默认）/ `fp16` / `fp32` |
 | `--model` | 换 HF id 或本地权重目录 |
 | `--gguf` | 用 GGUF 量化文件替换 DiT（如 `gguf\Qwen-Image-2.1-Turbo-Q8_0.gguf`）；DiT 整份常驻显存，`--batch > 1` 时自动回退逐层卸载 |
-
-## 支持比例与分辨率
-
-```
-1:1  2048x2048      4:3  2400x1792      3:4  1792x2400
-3:2  2528x1696      2:3  1696x2528
-16:9 2752x1536      9:16 1536x2752
-```

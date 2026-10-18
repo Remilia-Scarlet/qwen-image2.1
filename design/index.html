@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>生图控制台</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m3 17 6-6 4 4 3-3 5 5"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></symbol>
+    <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m3 8 9-5 9 5-9 5-9-5Zm0 5 9 5 9-5M3 18l9 5 9-5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M3 6h3c5 0 7 12 12 12h3m-4-4 4 4-4 4M3 18h3c2 0 3-2 5-5m2-2c2-3 3-5 5-5h3m-4-4 4 4-4 4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <span class="service-state" id="service-state">正在连接本地服务</span>
+    <div class="header-right"><span class="local-dot" id="connection-dot"></span><span id="connection-label">CONNECTING</span><button type="button" class="button secondary compact" id="toggle-fullscreen"><svg class="icon"><use href="#i-expand"/></svg><span>全屏</span></button></div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="rail" aria-label="工作区">
+      <div class="rail-item active" title="生图控制台"><svg class="icon"><use href="#i-terminal"/></svg><span>控制台</span></div>
+      <span class="rail-line"></span>
+      <span class="rail-caption">GPU<br>CTRL</span>
+      <span class="rail-bottom">V.03</span>
+    </aside>
+
+    <main class="workspace">
+      <div class="workspace-heading">
+        <div><p class="eyebrow">INFERENCE / CONFIGURATION</p><h1>生图控制台</h1></div>
+        <button type="button" class="button secondary compact" id="export-config"><svg class="icon"><use href="#i-copy"/></svg>导出配置</button>
+      </div>
+
+      <div class="studio-grid">
+        <form class="control-panel" id="generation-form">
+          <div class="control-scroll">
+          <section class="prompt-section" aria-labelledby="prompt-heading">
+            <div class="section-title"><h2 id="prompt-heading">提示词</h2><span class="micro-label">PROMPT</span></div>
+            <label class="upload-zone" for="reference-input"><svg class="icon"><use href="#i-plus"/></svg><span>添加参考图 <small>可选 · 最多 10 张</small></span></label>
+            <input class="sr-only" id="reference-input" type="file" accept="image/*" multiple>
+            <div class="reference-list" id="reference-list"></div>
+            <label class="sr-only" for="prompt">提示词</label>
+            <textarea id="prompt" name="prompt" rows="4" required placeholder="输入正向提示词…">一位二次元少女，半身像，银白色短发，蓝色眼睛，深色连帽外套，赛博朋克城市夜景，冷色霓虹光，精细动漫插画。</textarea>
+            <div class="prompt-footer"><span>正向提示词</span><span id="prompt-length">0 字</span></div>
+          </section>
+
+          <section class="phase-section" aria-labelledby="encoding-heading">
+            <div class="phase-heading"><div><h2 id="encoding-heading">文本编码</h2><p>TEXT ENCODER</p></div></div>
+            <fieldset class="strategy-fieldset"><legend>显存策略</legend>
+              <div class="strategy-options">
+                <label><input type="radio" name="encoder_strategy" value="resident"><span><svg class="icon"><use href="#i-chip"/></svg><strong>显存常驻</strong><small>整模型上 GPU</small></span></label>
+                <label><input type="radio" name="encoder_strategy" value="sequential" checked><span><svg class="icon"><use href="#i-layers"/></svg><strong>Sequential</strong><small>逐层加载与卸载</small></span></label>
+              </div>
+            </fieldset>
+            <p class="field-hint" id="encoder-hint">更省显存；文本编码完成后释放，进入生图阶段。</p>
+          </section>
+
+          <section class="phase-section generation-section" aria-labelledby="denoising-heading">
+            <div class="phase-heading"><div><h2 id="denoising-heading">图像迭代</h2><p>DIT DENOISING</p></div></div>
+            <fieldset class="model-fieldset"><legend>生成模型</legend>
+              <div class="model-options">
+                <label><input type="radio" name="model" value="turbo"><span class="model-card"><span class="model-top"><strong>Qwen-Image 2.1</strong><span class="radio-indicator"></span></span><span class="model-detail">Turbo <span>BF16 · 原版</span></span></span></label>
+                <label><input type="radio" name="model" value="q8" checked><span class="model-card"><span class="model-top"><strong>Qwen-Image 2.1</strong><span class="radio-indicator"></span></span><span class="model-detail">Turbo Q8 <span>GGUF · 量化</span></span></span></label>
+              </div>
+            </fieldset>
+            <fieldset class="strategy-fieldset"><legend>显存策略</legend>
+              <div class="strategy-options">
+                <label><input type="radio" name="dit_strategy" value="resident" checked><span><svg class="icon"><use href="#i-chip"/></svg><strong>显存常驻</strong><small>8 步无需搬运权重</small></span></label>
+                <label><input type="radio" name="dit_strategy" value="sequential"><span><svg class="icon"><use href="#i-layers"/></svg><strong>Sequential</strong><small>按层搬运，省显存</small></span></label>
+              </div>
+            </fieldset>
+            <div class="batch-fields">
+              <div><label class="field-label" for="batch">Batch size <span>每批张数</span></label><div class="stepper"><button type="button" data-step="-1" data-target="batch" aria-label="减少每批张数">−</button><input id="batch" name="batch" type="number" min="1" max="8" value="1" required><button type="button" data-step="1" data-target="batch" aria-label="增加每批张数">+</button></div></div>
+              <div><label class="field-label" for="count">Total <span>总生成张数</span></label><div class="stepper"><button type="button" data-step="-1" data-target="count" aria-label="减少总生成张数">−</button><input id="count" name="count" type="number" min="1" max="64" value="4" required><button type="button" data-step="1" data-target="count" aria-label="增加总生成张数">+</button></div></div>
+            </div>
+            <p class="field-hint batch-hint" id="batch-hint">分 4 批生成，每批 1 张；种子逐张递增。</p>
+            <div class="strategy-notice" id="strategy-notice" role="status"><svg class="icon"><use href="#i-info"/></svg><span>Q8 仅替换 DiT，文本编码器仍使用官方 Turbo。</span></div>
+          </section>
+
+          <section class="output-section" aria-labelledby="output-heading">
+            <div class="section-title"><h2 id="output-heading">画面设置</h2><span class="micro-label">OUTPUT</span></div>
+            <div class="output-fields">
+              <div><label class="field-label" for="width">输出宽度</label><div class="dimension-combo"><input class="parameter-input" id="width" name="width" type="text" inputmode="numeric" pattern="[1-9][0-9]*" value="1024" placeholder="自动" title="输入正整数像素值，或留空自动" autocomplete="off" role="combobox" aria-autocomplete="none" aria-expanded="false" aria-controls="width-options" aria-describedby="output-size-hint"><button class="dimension-toggle" type="button" tabindex="-1" aria-label="选择常用宽度"><svg class="icon"><use href="#i-chevron"/></svg></button><div class="dimension-options" id="width-options" role="listbox" aria-label="常用宽度" hidden></div></div></div>
+              <div><label class="field-label" for="height">输出高度</label><div class="dimension-combo"><input class="parameter-input" id="height" name="height" type="text" inputmode="numeric" pattern="[1-9][0-9]*" value="1024" placeholder="自动" title="输入正整数像素值，或留空自动" autocomplete="off" role="combobox" aria-autocomplete="none" aria-expanded="false" aria-controls="height-options" aria-describedby="output-size-hint"><button class="dimension-toggle" type="button" tabindex="-1" aria-label="选择常用高度"><svg class="icon"><use href="#i-chevron"/></svg></button><div class="dimension-options" id="height-options" role="listbox" aria-label="常用高度" hidden></div></div></div>
+              <div class="resolution-field"><label class="field-label" for="resolution">参考图缩放</label><div class="dimension-combo"><input class="parameter-input" id="resolution" name="resolution" type="text" inputmode="numeric" pattern="[1-9][0-9]*" value="1024" title="输入有效的正整数" autocomplete="off" role="combobox" aria-autocomplete="none" aria-expanded="false" aria-controls="resolution-options" aria-describedby="resolution-hint" required><button class="dimension-toggle" type="button" tabindex="-1" aria-label="选择参考图缩放"><svg class="icon"><use href="#i-chevron"/></svg></button><div class="dimension-options" id="resolution-options" role="listbox" aria-label="参考图缩放候选" hidden></div></div></div>
+            </div>
+            <p class="field-hint" id="output-size-hint" hidden></p>
+            <p class="field-hint" id="resolution-hint">模型读取参考图时，每张参考图被处理成约105万（1024 x 1024）的像素规模</p>
+            <label class="transparent-option" for="transparent"><span><strong>透明背景</strong><small>请求原生 RGBA 透明图，不是后期抠图。</small></span><input id="transparent" name="transparent" type="checkbox"></label>
+            <div class="seed-row"><label class="field-label" for="seed">起始种子 <span>Seed</span></label><div class="seed-input"><input id="seed" name="seed" type="number" value="42" min="0" max="2147483647" required><button type="button" id="random-seed" aria-label="随机起始种子" title="随机种子"><svg class="icon"><use href="#i-shuffle"/></svg></button></div></div>
+          </section>
+
+          </div>
+          <div class="generate-footer"><button class="button primary" id="generate-button" type="submit" disabled><svg class="icon"><use href="#i-terminal"/></svg><span>开始生成</span><span class="generate-count" id="generate-count">4 张</span><svg class="icon arrow-icon"><use href="#i-arrow"/></svg></button><p><span id="generation-help">正在检查服务与模型</span><kbd>Ctrl ↵</kbd></p></div>
+        </form>
+
+        <section class="preview-panel" aria-labelledby="preview-heading">
+          <div class="preview-heading"><div><span class="preview-dot"></span><h2 id="preview-heading">输出预览</h2><span class="preview-subtitle" id="preview-subtitle">OUTPUT / 00</span></div><span class="sample-tag" id="sample-tag">暂无生成结果</span></div>
+          <div class="canvas" id="canvas">
+            <div class="canvas-corner top-left"></div><div class="canvas-corner top-right"></div><div class="canvas-corner bottom-left"></div><div class="canvas-corner bottom-right"></div>
+            <div class="artwork-wrap"><img src="preview.svg" id="preview-image" alt="尚无生成结果，等待首次生成"><span class="artwork-caption" id="artwork-caption">OUTPUT / EMPTY</span></div>
+            <span class="canvas-label" id="canvas-label">NO IMAGE LOADED</span>
+            <a class="expand-button download-button" id="download-preview" aria-label="下载原始 PNG" hidden><svg class="icon"><use href="#i-download"/></svg></a>
+            <button type="button" class="expand-button" id="expand-preview" aria-label="放大预览" disabled><svg class="icon"><use href="#i-expand"/></svg></button>
+          </div>
+          <div class="image-meta" id="image-meta" hidden><div><span class="meta-model" id="meta-model"></span><span id="meta-size"></span><span id="meta-steps"></span><span id="meta-seed"></span><span class="meta-model" id="meta-format"></span></div></div>
+
+          <div class="preview-details">
+          <div class="execution-panel">
+            <div class="execution-heading"><h3>执行轨迹 <span>PIPELINE</span></h3><span class="execution-status" id="execution-status" role="status" aria-live="polite">等待开始</span></div>
+            <div class="pipeline-track">
+              <div class="pipeline-phase" id="encoder-phase"><span class="track-node">01</span><div><strong>文本编码</strong><span id="encoder-summary">Sequential</span></div><span class="phase-time" id="encoder-time">—</span></div>
+              <span class="track-connector"><svg class="icon"><use href="#i-arrow"/></svg></span>
+              <div class="pipeline-phase" id="dit-phase"><span class="track-node">02</span><div><strong>8 步图像迭代</strong><span id="dit-summary">Q8 · 显存常驻</span></div><span class="phase-time" id="dit-time">—</span></div>
+            </div>
+            <div class="progress-line"><span id="progress-fill"></span></div>
+            <div class="execution-bottom"><span id="execution-detail">编码 → 8 步迭代 → VAE 解码与保存</span><span id="progress-value">0 / 8</span></div>
+          </div>
+
+          <div class="gallery-panel">
+           <div class="results-heading"><h3>候选结果 <span id="results-count">00 / 00</span></h3><span id="gallery-description">仅显示已保存的图片</span></div>
+           <div class="candidate-gallery" id="candidate-gallery"></div>
+          </div>
+          </div>
+          <div class="preview-footnote"><span>两阶段独立配置 · 固定 8 步 · 本地推理</span><span id="backend-label">BACKEND / CONNECTING</span></div>
+        </section>
+      </div>
+      <footer class="workspace-footer"><span>LOCAL INFERENCE CONSOLE</span><span id="device-status">等待服务状态</span></footer>
+    </main>
+  </div>
+
+  <dialog id="preview-dialog" aria-label="生成图片预览"><button type="button" id="close-preview" class="dialog-close" aria-label="关闭预览"><svg class="icon"><use href="#i-close"/></svg></button><img alt="生成图片"><p></p></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

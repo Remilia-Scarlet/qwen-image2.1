@@ -10,3 +10,4 @@ __pycache__/
 
 # Local quantized model files (download via download_gguf.bat)
 /gguf/
+/outputs/
