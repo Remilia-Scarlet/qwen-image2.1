@@ -169,7 +169,9 @@ class _PromptCacheMixin:
         engine._check_cancel()
         if engine._prompt_cache is None:
             engine._emit("encoding", detail="Encoding prompt and reference vision context once per job")
-            engine._activate("text_encoder")
+            notice = engine._activate("text_encoder")
+            if notice:
+                engine._emit("encoding", detail=notice)
             try:
                 import torch
                 with torch.no_grad():
@@ -300,7 +302,9 @@ class InferenceEngine:
             self._check_cancel()
             if not self._job["denoising_started"]:
                 self._emit("denoising", step=0)
-                self._activate("transformer")
+                notice = self._activate("transformer")
+                if notice:
+                    self._emit("denoising", detail=notice)
                 self._job["denoising_started"] = True
             with self._timed("denoising"):
                 result = original_forward(*args, **kwargs)
@@ -354,7 +358,7 @@ class InferenceEngine:
     def _activate(self, name):
         self._check_cancel()
         if self._device != "cuda" or self._strategies[name] != "resident" or name in self._resident_active:
-            return
+            return None
         import torch
         module = getattr(self._pipe, name)
         weight_bytes = sum(t.numel() * t.element_size() for t in module.parameters())
@@ -367,14 +371,17 @@ class InferenceEngine:
         # Driver free memory excludes reusable blocks held by the CUDA allocator.
         self._empty_cache()
         free, _ = torch.cuda.mem_get_info()
+        notice = None
         if free < weight_bytes + headroom:
             strategy = "encoder_strategy" if name == "text_encoder" else "dit_strategy"
-            raise RuntimeError(f"Insufficient VRAM for resident {name}: requires at least "
-                               f"{(weight_bytes + headroom) / gib:.2f} GiB, free {free / gib:.2f} GiB. "
-                               f"Select {strategy}='sequential' or reduce batch/resolution.")
+            notice = (f"Insufficient VRAM for resident {name}: requires at least "
+                      f"{(weight_bytes + headroom) / gib:.2f} GiB, free {free / gib:.2f} GiB. "
+                      f"Continuing anyway; if this fails, select {strategy}='sequential' or reduce "
+                      f"batch/resolution.")
         module.to("cuda")
         self._resident_active.add(name)
         self._check_cancel()
+        return notice
 
     def _park(self, name):
         if name not in self._resident_active:

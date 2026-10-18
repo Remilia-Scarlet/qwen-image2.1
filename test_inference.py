@@ -485,11 +485,17 @@ class EngineTests(unittest.TestCase):
         patch("torch.cuda.mem_get_info", return_value=(7 * 1024 ** 3, 24 * 1024 ** 3)).start()
         result = self.run_job(GenerationRequest("cat", batch=8, count=1, width=1024, height=1024))
         self.assertEqual(result[0]["effective"]["batch"], 1)
-        with self.assertRaisesRegex(RuntimeError, "dit_strategy='sequential'"):
-            self.run_job(GenerationRequest("cat", model="q8", batch=2, count=2, width=1024, height=1024),
-                         directory="low-memory")
-        self.assertIsNone(self.engine._pipe)
+        self.trace.clear()
+        result = self.run_job(GenerationRequest("cat", model="q8", batch=2, count=2, width=1024, height=1024),
+                              directory="low-memory")
+        self.assertEqual(len(result), 2)
+        self.assertIn(("transformer", "to", "cuda"), self.trace)
         self.assertFalse(self.pipes[-1].transformer.sequential)
+        self.assertEqual(self.engine._strategies["transformer"], "resident")
+        self.assertEqual(result[0]["effective"]["dit_strategy"], "resident")
+        notices = [event for event in self.events
+                   if event.get("phase") == "denoising" and "Insufficient VRAM" in event.get("detail", "")]
+        self.assertTrue(notices)
 
     def test_resident_admission_reclaims_cached_but_not_live_memory(self):
         self.use_cuda()
@@ -507,9 +513,9 @@ class EngineTests(unittest.TestCase):
         self.engine._park("transformer")
         free[0] = int(14.43 * 1024 ** 3)
         self.engine._empty_cache.side_effect = None
-        with self.assertRaisesRegex(RuntimeError, "Insufficient VRAM"):
-            self.engine._activate("transformer")
-        self.assertNotIn("transformer", self.engine._resident_active)
+        notice = self.engine._activate("transformer")
+        self.assertIn("Insufficient VRAM", notice)
+        self.assertIn("transformer", self.engine._resident_active)
 
     def test_resident_two_batches_release_decode_cache_and_keep_all_outputs(self):
         self.use_cuda()

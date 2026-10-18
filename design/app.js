@@ -250,6 +250,79 @@ $("random-seed").addEventListener("click", () => {
   updateConfiguration();
 });
 
+const promptHistoryKey = "qwen-prompt-history";
+const promptHistoryLimit = 20;
+let promptHistory = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(promptHistoryKey) || "[]");
+    return Array.isArray(saved) ? saved.filter((item) => typeof item === "string" && item.trim()).slice(0, promptHistoryLimit) : [];
+  } catch { return []; }
+})();
+
+function savePromptHistory() {
+  try { localStorage.setItem(promptHistoryKey, JSON.stringify(promptHistory)); } catch { /* Storage may be disabled. */ }
+}
+
+function renderPromptHistory() {
+  $("prompt-history-empty").hidden = promptHistory.length > 0;
+  $("prompt-history-clear").hidden = !promptHistory.length;
+  const list = $("prompt-history-list");
+  list.replaceChildren();
+  promptHistory.forEach((text) => {
+    const item = document.createElement("li");
+    const fill = document.createElement("button");
+    fill.type = "button";
+    fill.className = "history-entry";
+    fill.textContent = text;
+    fill.title = text;
+    fill.addEventListener("click", () => {
+      $("prompt").value = text;
+      $("prompt").dispatchEvent(new Event("input", { bubbles: true }));
+      setPromptHistory(false);
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "history-remove";
+    remove.setAttribute("aria-label", `删除历史提示词：${text.slice(0, 30)}`);
+    remove.innerHTML = '<svg class="icon"><use href="#i-close"/></svg>';
+    remove.addEventListener("click", () => {
+      promptHistory = promptHistory.filter((item) => item !== text);
+      savePromptHistory();
+      renderPromptHistory();
+    });
+    item.append(fill, remove);
+    list.append(item);
+  });
+}
+
+function setPromptHistory(open) {
+  $("prompt-history").hidden = !open;
+  $("prompt-history-toggle").setAttribute("aria-expanded", String(open));
+}
+
+function rememberPrompt(prompt) {
+  const text = String(prompt || "").trim();
+  if (!text) return;
+  promptHistory = [text, ...promptHistory.filter((item) => item !== text)].slice(0, promptHistoryLimit);
+  savePromptHistory();
+  renderPromptHistory();
+}
+
+$("prompt-history-toggle").addEventListener("click", () => setPromptHistory($("prompt-history").hidden));
+$("prompt-history-clear").addEventListener("click", () => {
+  promptHistory = [];
+  savePromptHistory();
+  renderPromptHistory();
+});
+form.addEventListener("submit", () => setPromptHistory(false));
+document.addEventListener("pointerdown", (event) => {
+  if ($("prompt-history").hidden || event.target.closest("#prompt-history") || event.target.closest("#prompt-history-toggle")) return;
+  setPromptHistory(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("prompt-history").hidden) setPromptHistory(false);
+});
+
 function renderReferences() {
   $("reference-list").replaceChildren();
   references.forEach((ref, index) => {
@@ -591,6 +664,7 @@ form.addEventListener("submit", async (event) => {
     if (token !== operation) return;
     if (!snapshot.id) throw new Error("服务未返回任务 ID。" );
     jobId = snapshot.id;
+    rememberPrompt(config.prompt);
     rememberJob(jobId);
     connection(true);
     applyJob(snapshot, token);
@@ -671,6 +745,7 @@ $("preview-dialog").addEventListener("click", (event) => {
 });
 
 updateConfiguration();
+renderPromptHistory();
 let savedJob;
 try { savedJob = localStorage.getItem(storageKey); } catch { /* Optional persistence. */ }
 if (savedJob && location.protocol !== "file:") beginJob(savedJob);

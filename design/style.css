@@ -79,7 +79,24 @@ textarea { resize: vertical; width: 100%; min-height: 132px; max-height: 350px; 
 textarea::placeholder { color: var(--muted); }
 .prompt-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; color: var(--muted); font-size: 13px; }
 .prompt-footer > span:first-child { display: flex; align-items: center; gap: 6px; }
-.prompt-footer > span:last-child { font: 13px var(--mono); }
+.prompt-footer-actions { display: flex; align-items: center; gap: 12px; }
+#prompt-length { font: 13px var(--mono); }
+.history-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--input); color: var(--muted); font-size: 13px; }
+.history-toggle:hover { background: var(--surface); border-color: var(--accent); color: var(--accent); }
+.history-toggle[aria-expanded="true"] { background: var(--accent-tint); border-color: var(--accent); color: var(--accent); }
+.history-toggle .icon { width: 15px; height: 15px; }
+.prompt-history { margin-top: 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--input); }
+.history-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px 8px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.history-head button { padding: 4px 8px; border: 0; border-radius: 3px; background: none; color: var(--muted); font-size: 13px; }
+.history-head button:hover { background: var(--surface); color: #ffb4ac; }
+.history-list { margin: 0; padding: 4px; list-style: none; max-height: 240px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.history-list li { display: flex; align-items: center; gap: 2px; }
+.history-entry { flex: 1; min-width: 0; padding: 8px 10px; border: 0; border-radius: 3px; background: transparent; color: var(--ink); text-align: left; font-size: 14px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.history-entry:hover { background: var(--accent-tint); color: var(--accent); }
+.history-remove { display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; border: 0; border-radius: 3px; background: none; color: var(--muted); }
+.history-remove:hover { background: var(--surface); color: #ffb4ac; }
+.history-remove .icon { width: 16px; height: 16px; }
+.history-empty { padding: 12px; color: var(--muted); font-size: 13px; }
 .upload-zone { display: flex; align-items: center; justify-content: center; gap: 12px; border: 1px dashed var(--line-strong); padding: 15px; border-radius: 4px; background: var(--input); color: var(--ink); font-size: 16px; margin-bottom: 12px; cursor: pointer; }
 .upload-zone:hover { background: var(--surface); border-color: var(--accent); }
 .upload-zone small { display: block; color: var(--muted); font-size: 13px; margin-top: 5px; }
