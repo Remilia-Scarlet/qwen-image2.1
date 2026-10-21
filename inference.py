@@ -19,6 +19,9 @@ class GenerationCancelled(Exception):
     """Cooperative cancellation; already emitted outputs remain on disk."""
 
 
+_DECODE_GROUP = 10
+
+
 def _integer(name, value, minimum, maximum):
     if type(value) is not int or not minimum <= value <= maximum:
         raise ValueError(f"{name} must be an integer from {minimum} to {maximum}")
@@ -460,6 +463,49 @@ class InferenceEngine:
             import torch
             torch.cuda.synchronize()
 
+    def _decode_latents(self, latents, width, height):
+        import torch
+        pipe = self._pipe
+        scale = pipe.vae_scale_factor
+        batch, _, channels = latents.shape
+        latent_height = 2 * (int(height) // (scale * 2))
+        latent_width = 2 * (int(width) // (scale * 2))
+        latents = latents.transpose(1, 2).reshape(batch, channels, 1, latent_height, latent_width)
+        latents = latents.to(pipe.vae.dtype)
+        mean = torch.tensor(pipe.vae.config.latents_mean).view(1, pipe.vae.config.z_dim, 1, 1, 1)
+        std = torch.tensor(pipe.vae.config.latents_std).view(1, pipe.vae.config.z_dim, 1, 1, 1)
+        latents = latents * std.to(latents.device, latents.dtype) + mean.to(latents.device, latents.dtype)
+        with torch.no_grad():
+            image = pipe.vae.decode(latents, return_dict=False)[0][:, :, 0]
+            return pipe.image_processor.postprocess(image, output_type="pil")
+
+    def _save_image(self, image, directory, index, seed, request, effective, reference_count):
+        from PIL.PngImagePlugin import PngInfo
+        filename = f"{index:04d}_seed{seed}.png"
+        path = directory / filename
+        has_alpha = any(band.lower() == "a" for band in image.getbands()) or (
+            image.mode == "P" and "transparency" in image.info
+        )
+        record = {"id": f"{index:04d}", "filename": filename, "path": str(path),
+                  "seed": seed, "width": image.width, "height": image.height,
+                  "mode": "RGBA" if has_alpha else "RGB", "model": request.model,
+                  "effective": dict(effective)}
+        provenance = {"output": {key: value for key, value in record.items() if key != "path"},
+                      "config": request.to_dict(), "reference_count": reference_count,
+                      "timings": dict(self._job["timings"])}
+        metadata = PngInfo()
+        metadata.add_text("qwen_generation", json.dumps(provenance))
+        with self._timed("saving"):
+            # Exclusive creation prevents accidental replacement if a job directory is reused.
+            with path.open("xb") as target:
+                try:
+                    image.convert(record["mode"]).save(target, format="PNG", pnginfo=metadata)
+                except Exception:
+                    target.close()
+                    path.unlink(missing_ok=True)
+                    raise
+        return record
+
     def generate(self, request: GenerationRequest, references: list, output_dir: Path, *,
                  cancel_event: threading.Event, on_event) -> list[dict]:
         if not isinstance(request, GenerationRequest):
@@ -482,10 +528,11 @@ class InferenceEngine:
             width = height = 2048
         if width is None:
             ratio = references[-1].width / references[-1].height
-            area = (round(math.sqrt(request.resolution ** 2 * ratio) / 32) * 32 *
-                    round(math.sqrt(request.resolution ** 2 / ratio) / 32) * 32)
+            decode_width = round(math.sqrt(request.resolution ** 2 * ratio) / 32) * 32
+            decode_height = round(math.sqrt(request.resolution ** 2 / ratio) / 32) * 32
         else:
-            area = (width // 32 * 32) * (height // 32 * 32)
+            decode_width, decode_height = width // 32 * 32, height // 32 * 32
+        area = decode_width * decode_height
         batch = min(request.batch, request.count)
         effective = {"model": request.model, "encoder_strategy": request.encoder_strategy,
                      "dit_strategy": request.dit_strategy, "batch": batch, "steps": 8,
@@ -518,10 +565,13 @@ class InferenceEngine:
                     self._install_wrappers()
                 self._check_cancel()
                 self._configure(request)
+                decode_group = (_DECODE_GROUP if self._device == "cuda" and batch == 1
+                                and request.count > 1 and self._strategies["transformer"] == "resident" else 1)
+                decode_group = min(decode_group, request.count)
+                effective["decode_group"] = decode_group
                 pipe = self._pipe
                 self._prompt_cache = None
                 import torch
-                from PIL.PngImagePlugin import PngInfo
                 directory = Path(output_dir).resolve()
                 directory.mkdir(parents=True, exist_ok=True)
 
@@ -536,65 +586,93 @@ class InferenceEngine:
                     self._check_cancel()
                     return {}
 
-                for start in range(0, request.count, batch):
-                    self._check_cancel()
-                    self._job["batch_index"] = start // batch + 1
-                    self._job["denoising_started"] = False
-                    self._job["reference_index"] = 0
-                    self._job["step_times"] = []
-                    self._job["step_clock"] = None
-                    chunk = min(batch, request.count - start)
-                    seeds = [request.seed + start + offset for offset in range(chunk)]
-                    generators = [torch.Generator(self._device).manual_seed(seed) for seed in seeds]
-                    call = {"prompt": RGBA_PREFIX.format(prompt=request.prompt) if request.transparent else request.prompt,
-                            "output_resolution": request.resolution, "true_cfg_scale": 1.0,
-                            "num_images_per_prompt": chunk,
-                            "generator": generators if chunk > 1 else generators[0],
-                            "callback_on_step_end": step_callback, "callback_on_step_end_tensor_inputs": [],
-                            "use_kv_cache": True}
-                    if references:
-                        call["image"] = references
-                    if width is not None:
-                        call.update(width=width, height=height)
-                    with torch.no_grad():
-                        results = pipe(**call).images
-                    self._check_cancel()
-                    if len(results) != chunk:
-                        raise RuntimeError(f"Pipeline returned {len(results)} images; expected {chunk}")
-                    self._emit("saving")
-                    for offset, image in enumerate(results):
+                if decode_group == 1:
+                    for start in range(0, request.count, batch):
                         self._check_cancel()
-                        index = start + offset + 1
-                        filename = f"{index:04d}_seed{seeds[offset]}.png"
-                        path = directory / filename
-                        has_alpha = any(band.lower() == "a" for band in image.getbands()) or (
-                            image.mode == "P" and "transparency" in image.info
-                        )
-                        record = {"id": f"{index:04d}", "filename": filename, "path": str(path),
-                                  "seed": seeds[offset], "width": image.width, "height": image.height,
-                                  "mode": "RGBA" if has_alpha else "RGB", "model": request.model,
-                                  "effective": dict(effective)}
-                        provenance = {"output": {key: value for key, value in record.items() if key != "path"},
-                                      "config": request.to_dict(),
-                                      "reference_count": len(references), "timings": dict(self._job["timings"])}
-                        metadata = PngInfo()
-                        metadata.add_text("qwen_generation", json.dumps(provenance))
-                        with self._timed("saving"):
-                            # Exclusive creation prevents accidental replacement if a job directory is reused.
-                            with path.open("xb") as target:
-                                try:
-                                    image.convert(record["mode"]).save(target, format="PNG", pnginfo=metadata)
-                                except Exception:
-                                    target.close()
-                                    path.unlink(missing_ok=True)
-                                    raise
-                        outputs.append(record)
-                        self._job["completed"] = len(outputs)
-                        on_event({"output": record})
+                        self._job["batch_index"] = start // batch + 1
+                        self._job["denoising_started"] = False
+                        self._job["reference_index"] = 0
+                        self._job["step_times"] = []
+                        self._job["step_clock"] = None
+                        chunk = min(batch, request.count - start)
+                        seeds = [request.seed + start + offset for offset in range(chunk)]
+                        generators = [torch.Generator(self._device).manual_seed(seed) for seed in seeds]
+                        call = {"prompt": RGBA_PREFIX.format(prompt=request.prompt) if request.transparent else request.prompt,
+                                "output_resolution": request.resolution, "true_cfg_scale": 1.0,
+                                "num_images_per_prompt": chunk,
+                                "generator": generators if chunk > 1 else generators[0],
+                                "callback_on_step_end": step_callback, "callback_on_step_end_tensor_inputs": [],
+                                "use_kv_cache": True}
+                        if references:
+                            call["image"] = references
+                        if width is not None:
+                            call.update(width=width, height=height)
+                        with torch.no_grad():
+                            results = pipe(**call).images
                         self._check_cancel()
-                    results = None
-                    self._empty_cache()
-                    self._emit("saving", detail="Batch saved")
+                        if len(results) != chunk:
+                            raise RuntimeError(f"Pipeline returned {len(results)} images; expected {chunk}")
+                        self._emit("saving")
+                        for offset, image in enumerate(results):
+                            self._check_cancel()
+                            record = self._save_image(image, directory, start + offset + 1, seeds[offset],
+                                                      request, effective, len(references))
+                            outputs.append(record)
+                            self._job["completed"] = len(outputs)
+                            on_event({"output": record})
+                            self._check_cancel()
+                        results = None
+                        self._empty_cache()
+                        self._emit("saving", detail="Batch saved")
+                else:
+                    for group_start in range(0, request.count, decode_group):
+                        self._check_cancel()
+                        group_count = min(decode_group, request.count - group_start)
+                        latents = []
+                        seeds = []
+                        for offset in range(group_count):
+                            index = group_start + offset
+                            self._check_cancel()
+                            self._job["batch_index"] = index + 1
+                            self._job["denoising_started"] = False
+                            self._job["reference_index"] = 0
+                            self._job["step_times"] = []
+                            self._job["step_clock"] = None
+                            seed = request.seed + index
+                            seeds.append(seed)
+                            generator = torch.Generator(self._device).manual_seed(seed)
+                            call = {"prompt": RGBA_PREFIX.format(prompt=request.prompt) if request.transparent else request.prompt,
+                                    "output_resolution": request.resolution, "true_cfg_scale": 1.0,
+                                    "num_images_per_prompt": 1, "generator": generator, "output_type": "latent",
+                                    "callback_on_step_end": step_callback,
+                                    "callback_on_step_end_tensor_inputs": [], "use_kv_cache": True}
+                            if references:
+                                call["image"] = references
+                            if width is not None:
+                                call.update(width=width, height=height)
+                            with torch.no_grad():
+                                result = pipe(**call).images
+                            self._check_cancel()
+                            if not isinstance(result, torch.Tensor) or result.shape[0] != 1:
+                                raise RuntimeError("Pipeline returned an unexpected latent batch")
+                            latents.append(result)
+                        latents = torch.cat(latents, dim=0)
+                        images = self._decode_latents(latents, decode_width, decode_height)
+                        self._check_cancel()
+                        if len(images) != group_count:
+                            raise RuntimeError(f"Pipeline returned {len(images)} images; expected {group_count}")
+                        self._emit("saving")
+                        for offset, image in enumerate(images):
+                            self._check_cancel()
+                            record = self._save_image(image, directory, group_start + offset + 1,
+                                                      seeds[offset], request, effective, len(references))
+                            outputs.append(record)
+                            self._job["completed"] = len(outputs)
+                            on_event({"output": record})
+                            self._check_cancel()
+                        latents = images = result = None
+                        self._empty_cache()
+                        self._emit("saving", detail="Batch saved")
                 for name in tuple(self._resident_active):
                     self._park(name)
             except GenerationCancelled as error:

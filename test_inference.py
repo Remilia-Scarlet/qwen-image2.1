@@ -226,6 +226,14 @@ class FakeModule(torch.nn.Module):
 
 
 class FakeVAE(FakeModule):
+    def __init__(self, name, trace):
+        super().__init__(name, trace)
+        self.config = SimpleNamespace(z_dim=4, latents_mean=[0] * 4, latents_std=[1] * 4)
+
+    @property
+    def dtype(self):
+        return self.weight.dtype
+
     def enable_slicing(self):
         self.slicing = True
 
@@ -238,10 +246,14 @@ class FakeVAE(FakeModule):
             self._hf_hook.pre_forward(self)
         return torch.ones(1)
 
-    def decode(self, *args, **kwargs):
+    def decode(self, latents=None, return_dict=False, **kwargs):
         self.trace.append(("vae", "decode"))
+        self.decode_grad_enabled = torch.is_grad_enabled()
+        self.decoded_batch = None if latents is None else latents.shape[0]
         if hasattr(self, "_hf_hook"):
             self._hf_hook.pre_forward(self)
+        if latents is not None and latents.dim() == 5:
+            return (torch.zeros(latents.shape[0], 4, 1, latents.shape[-2] * 16, latents.shape[-1] * 16),)
         return torch.ones(1)
 
 
@@ -267,12 +279,13 @@ class FakeBasePipeline:
 
     def __call__(self, *, prompt, output_resolution, true_cfg_scale, num_images_per_prompt,
                  generator, callback_on_step_end, callback_on_step_end_tensor_inputs, use_kv_cache,
-                 image=None, width=None, height=None):
+                 image=None, width=None, height=None, output_type="pil"):
         assert true_cfg_scale == 1.0
         assert callback_on_step_end_tensor_inputs == []
         assert use_kv_cache is True
         self.calls.append({"batch": num_images_per_prompt, "generator": generator, "width": width, "height": height,
-                           "resolution": output_resolution, "prompt": prompt, "image": image})
+                           "resolution": output_resolution, "prompt": prompt, "image": image,
+                           "output_type": output_type})
         # Deliberately resizes here, not in the engine, as the upstream call does.
         refs = [i.resize((32, 32)) for i in image] if image else None
         triple = self.encode_prompt(prompt, refs, torch.device("cpu"), num_images_per_prompt)
@@ -288,8 +301,10 @@ class FakeBasePipeline:
             result = callback_on_step_end(self, index, torch.tensor(index), {})
             assert result == {}
             self.callback_returns.append(result)
-        self.vae.decode(torch.ones(1), return_dict=False)
         w, h = (width or output_resolution) // 32 * 32, (height or output_resolution) // 32 * 32
+        if output_type == "latent":
+            return SimpleNamespace(images=torch.ones(1, (w // 16) * (h // 16), self.vae.config.z_dim))
+        self.vae.decode(torch.ones(1), return_dict=False)
         if self.output_image is not None:
             return SimpleNamespace(images=[self.output_image.copy() for _ in range(num_images_per_prompt)])
         return SimpleNamespace(images=[Image.new("RGBA", (w, h), (10, 20, 30, 80))
@@ -303,10 +318,18 @@ class FakePipeline(inference._PromptCacheMixin, FakeBasePipeline):
         self.text_encoder = FakeModule("text_encoder", trace)
         self.transformer = FakeModule("transformer", trace)
         self.vae = FakeVAE("vae", trace)
+        self.vae_scale_factor = 16
+        self.image_processor = SimpleNamespace(postprocess=self.postprocess)
         self.processor = SimpleNamespace(image_processor=SimpleNamespace(do_resize=True))
         self.encode_count = 0
         self.output_image = None
         self.calls, self.triples, self.callback_returns = [], [], []
+
+    def postprocess(self, image, output_type="pil"):
+        if self.output_image is not None:
+            return [self.output_image.copy() for _ in range(image.shape[0])]
+        height, width = image.shape[-2], image.shape[-1]
+        return [Image.new("RGBA", (width, height), (10, 20, 30, 80)) for _ in range(image.shape[0])]
 
 
 class EngineTests(unittest.TestCase):
@@ -592,6 +615,29 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(memory["cached"], 0)
         self.assertEqual(memory["free"], int(21.5 * gib))
         self.assertEqual(pipe.transformer.placement, "cpu")
+
+    def test_grouped_decode_keeps_dit_resident_across_ten_denoises(self):
+        self.use_cuda()
+        request = GenerationRequest("cat", model="q8", dit_strategy="resident", batch=1, count=10,
+                                    width=64, height=64)
+        records = self.run_job(request)
+        pipe = self.pipes[0]
+        self.assertEqual([call["batch"] for call in pipe.calls], [1] * 10)
+        self.assertEqual([call["output_type"] for call in pipe.calls], ["latent"] * 10)
+        self.assertEqual(pipe.trace.count(("vae", "decode")), 1)
+        self.assertFalse(pipe.vae.decode_grad_enabled)
+        self.assertEqual(pipe.vae.decoded_batch, 10)
+        moves = [i for i, item in enumerate(self.trace) if item == ("transformer", "to", "cuda")]
+        self.assertEqual(len(moves), 1)
+        parks = [i for i, item in enumerate(self.trace)
+                 if item == ("transformer", "to", "cpu") and i > moves[0]]
+        self.assertEqual(len(parks), 1)
+        self.assertLess(parks[0], self.trace.index(("vae", "decode")))
+        self.assertEqual([record["seed"] for record in records], list(range(42, 52)))
+        self.assertEqual([record["effective"]["decode_group"] for record in records], [10] * 10)
+        self.assertEqual(pipe.encode_count, 1)
+        with Image.open(records[0]["path"]) as image:
+            self.assertEqual(image.size, (64, 64))
 
     def test_oom_evicts_and_next_job_reloads(self):
         self.run_job()
