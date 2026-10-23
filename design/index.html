@@ -35,10 +35,33 @@
   </header>
 
   <div class="app-shell">
-    <aside class="rail" aria-label="工作区">
-      <div class="rail-item active" title="生图控制台"><svg class="icon"><use href="#i-terminal"/></svg><span>控制台</span></div>
-      <span class="rail-line"></span>
-      <span class="rail-caption">GPU<br>CTRL</span>
+    <aside class="rail" aria-label="电脑状态">
+      <div class="rail-monitor">
+        <div class="rail-metric" data-metric="memory">
+          <div class="rail-metric-head"><span>内存</span><b id="memory-value">--</b></div>
+          <svg class="rail-chart" viewBox="0 0 72 40" preserveAspectRatio="none" role="img" aria-label="内存占用趋势">
+            <defs><linearGradient id="memory-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0"/><stop offset="1"/></linearGradient></defs>
+            <path class="rail-chart-area" id="memory-area" fill="url(#memory-fill)" d=""/>
+            <path class="rail-chart-line" id="memory-line" d=""/>
+          </svg>
+        </div>
+        <div class="rail-metric" data-metric="vram">
+          <div class="rail-metric-head"><span>显存</span><b id="vram-value">--</b></div>
+          <svg class="rail-chart" viewBox="0 0 72 40" preserveAspectRatio="none" role="img" aria-label="显存占用趋势">
+            <defs><linearGradient id="vram-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0"/><stop offset="1"/></linearGradient></defs>
+            <path class="rail-chart-area" id="vram-area" fill="url(#vram-fill)" d=""/>
+            <path class="rail-chart-line" id="vram-line" d=""/>
+          </svg>
+        </div>
+        <div class="rail-metric" data-metric="gpu">
+          <div class="rail-metric-head"><span>GPU</span><b id="gpu-value">--</b></div>
+          <svg class="rail-chart" viewBox="0 0 72 40" preserveAspectRatio="none" role="img" aria-label="GPU 占用率趋势">
+            <defs><linearGradient id="gpu-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0"/><stop offset="1"/></linearGradient></defs>
+            <path class="rail-chart-area" id="gpu-area" fill="url(#gpu-fill)" d=""/>
+            <path class="rail-chart-line" id="gpu-line" d=""/>
+          </svg>
+        </div>
+      </div>
       <span class="rail-bottom">V.03</span>
     </aside>
 
@@ -150,7 +173,6 @@
           <div class="preview-footnote"><span>两阶段独立配置 · 固定 8 步 · 本地推理</span><span id="backend-label">BACKEND / CONNECTING</span></div>
         </section>
       </div>
-      <footer class="workspace-footer"><span>LOCAL INFERENCE CONSOLE</span><span id="device-status">等待服务状态</span></footer>
     </main>
   </div>
 

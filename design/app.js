@@ -14,6 +14,7 @@ let job = null;
 let operation = 0;
 let pollTimer;
 let statusTimer;
+let systemSampleTimer;
 let cancelPending = false;
 let cancelRequested = false;
 let cancelError = "";
@@ -44,10 +45,10 @@ function execution(status, detail, error = false) {
   $("execution-detail").parentElement.classList.toggle("error", error);
 }
 
-async function request(path, body) {
+async function request(path, body, timeoutMs = body ? 30000 : 8000) {
   const controller = new AbortController();
   // This timeout only ends the HTTP wait. It never cancels backend inference.
-  const timeout = setTimeout(() => controller.abort(), body ? 30000 : 8000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(path, {
       method: body ? "POST" : "GET",
@@ -99,6 +100,94 @@ function notify(message) {
   $("toast").textContent = message;
   $("toast").hidden = false;
   toastTimer = setTimeout(() => { $("toast").hidden = true; }, 3500);
+}
+
+const chartMetrics = {
+  memory: { history: [], value: null },
+  vram: { history: [], value: null },
+  gpu: { history: [], value: null },
+};
+const chartPoints = 36;
+const chartView = { width: 72, height: 40, pad: 3 };
+
+function formatGib(bytes) {
+  return `${(bytes / 1073741824).toFixed(1)} GiB`;
+}
+
+function metricPercent(value) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
+}
+
+function drawMetric(name) {
+  const { history } = chartMetrics[name];
+  if (!history.length) return;
+  const { width, height, pad } = chartView;
+  const usableWidth = width - pad * 2;
+  const usableHeight = height - pad * 2;
+  const step = usableWidth / (history.length - 1);
+  const points = history.map((value, index) => {
+    const x = pad + index * step;
+    const y = pad + usableHeight * (1 - value / 100);
+    return `${x.toFixed(2)} ${y.toFixed(2)}`;
+  });
+  const bottom = (height - pad).toFixed(2);
+  $(`${name}-line`).setAttribute("d", `M ${points.join(" L ")}`);
+  $(`${name}-area`).setAttribute("d", `M ${pad} ${bottom} L ${points.join(" L ")} L ${(width - pad).toFixed(2)} ${bottom} Z`);
+}
+
+function updateMetric(name, value) {
+  const state = chartMetrics[name];
+  const percent = metricPercent(value);
+  state.value = percent;
+  if (percent === null) {
+    $(`${name}-value`).textContent = "--";
+    return;
+  }
+  if (!state.history.length) state.history = Array(chartPoints).fill(percent);
+  state.history.push(percent);
+  if (state.history.length > chartPoints) state.history.shift();
+  $(`${name}-value`).textContent = `${Math.round(percent)}%`;
+  drawMetric(name);
+}
+
+function updateSystemMonitor(status) {
+  const memory = status?.memory;
+  if (memory && Number.isFinite(memory.total_bytes) && memory.total_bytes > 0) {
+    const used = memory.total_bytes - memory.available_bytes;
+    updateMetric("memory", used / memory.total_bytes * 100);
+    $(`memory-value`).title = `已用 ${formatGib(used)} / ${formatGib(memory.total_bytes)}`;
+  } else {
+    updateMetric("memory", null);
+    $("memory-value").title = "服务未报告系统内存";
+  }
+  const gpu = status?.gpu;
+  if (gpu && Number.isFinite(gpu.total_bytes) && gpu.total_bytes > 0) {
+    const used = gpu.total_bytes - gpu.free_bytes;
+    updateMetric("vram", used / gpu.total_bytes * 100);
+    $("vram-value").title = `已用 ${formatGib(used)} / ${formatGib(gpu.total_bytes)}`;
+    updateMetric("gpu", gpu.utilization);
+    $("gpu-value").title = Number.isFinite(gpu.utilization) ? `GPU 占用率 ${Math.round(gpu.utilization)}%` : "服务未报告 GPU 占用率";
+  } else {
+    updateMetric("vram", null);
+    updateMetric("gpu", null);
+    $("vram-value").title = "服务未报告 GPU 显存";
+    $("gpu-value").title = "服务未报告 GPU 占用率";
+  }
+}
+
+async function refreshSystemMonitor() {
+  clearTimeout(systemSampleTimer);
+  if (location.protocol === "file:") {
+    updateSystemMonitor(null);
+    systemSampleTimer = setTimeout(refreshSystemMonitor, 1000);
+    return;
+  }
+  try {
+    updateSystemMonitor(await request("/api/status", undefined, 30000));
+  } catch {
+    updateSystemMonitor(null);
+  }
+  systemSampleTimer = setTimeout(refreshSystemMonitor, 1000);
 }
 
 function configuration() {
@@ -830,8 +919,6 @@ async function refreshStatus() {
     if (!Array.isArray(status.models)) throw new Error("服务状态缺少模型信息。");
     service = status;
     connection(true);
-    const gpu = status.gpu;
-    $("device-status").textContent = gpu ? `${gpu.name} · 空闲 ${(gpu.free_bytes / 1073741824).toFixed(1)} / ${(gpu.total_bytes / 1073741824).toFixed(1)} GiB` : status.device === "cpu" ? "CPU · 服务未报告 GPU 显存" : status.device === "cuda" ? "CUDA · 服务未报告 GPU 显存" : "推理设备不可用";
     if (!running) {
       updateConfiguration();
       if (connectionNotice) {
@@ -843,7 +930,6 @@ async function refreshStatus() {
   } catch (error) {
     if (token !== operation) return;
     connection(false);
-    $("device-status").textContent = "服务未连接，设备状态未知";
     if (!job && !running && (!$("execution-status").classList.contains("error") || connectionNotice)) {
       execution("未连接服务", `${error.message} 请运行 start_web.bat，页面将自动重连。`, true);
       connectionNotice = true;
@@ -983,3 +1069,4 @@ let savedJob;
 try { savedJob = localStorage.getItem(storageKey); } catch { /* Optional persistence. */ }
 if (savedJob && location.protocol !== "file:") beginJob(savedJob);
 refreshStatus();
+refreshSystemMonitor();

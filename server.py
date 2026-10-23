@@ -551,10 +551,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             raise APIError(404, "Unknown endpoint")
         except APIError as error:
             self._json(error.status, error.payload)
-        except (BrokenPipeError, ConnectionResetError, socket.timeout):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.timeout):
             pass
         except Exception:
-            self._json(500, {"error": "Internal server error; no generation was confirmed by this response"})
+            try:
+                self._json(500, {"error": "Internal server error; no generation was confirmed by this response"})
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.timeout):
+                pass
 
     def do_GET(self):
         self._dispatch("GET")

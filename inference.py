@@ -6,6 +6,7 @@ import json
 import math
 import os
 import struct
+import subprocess
 import threading
 import time
 from contextlib import contextmanager
@@ -20,6 +21,68 @@ class GenerationCancelled(Exception):
 
 
 _DECODE_GROUP = 10
+
+
+def _system_memory():
+    """Best-effort physical memory snapshot without adding hard requirements."""
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        return {"total_bytes": int(memory.total), "available_bytes": int(memory.available)}
+    except (ImportError, OSError, AttributeError):
+        pass
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class _MemoryStatusEx(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            status = _MemoryStatusEx()
+            status.dwLength = ctypes.sizeof(_MemoryStatusEx)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return {"total_bytes": int(status.ullTotalPhys),
+                        "available_bytes": int(status.ullAvailPhys)}
+        else:
+            values = {}
+            with open("/proc/meminfo", encoding="ascii") as handle:
+                for line in handle:
+                    key, _, value = line.partition(":")
+                    values[key] = int(value.split()[0]) * 1024
+            return {"total_bytes": values["MemTotal"], "available_bytes": values["MemAvailable"]}
+    except (OSError, ValueError, AttributeError, KeyError):
+        pass
+    return None
+
+
+def _gpu_utilization():
+    """Percent GPU busy time, using pynvml or nvidia-smi when available."""
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        try:
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            return float(pynvml.nvmlDeviceGetUtilizationRates(handle).gpu)
+        finally:
+            pynvml.nvmlShutdown()
+    except Exception:
+        pass
+    try:
+        flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2, check=True, **flags)
+        return max(0.0, min(100.0, float(result.stdout.split()[0])))
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None
 
 
 def _integer(name, value, minimum, maximum):
@@ -259,13 +322,16 @@ class InferenceEngine:
 
     def capabilities(self):
         device, gpu = self._device_info()
+        if gpu is not None:
+            gpu = {**gpu, "utilization": _gpu_utilization()}
         models = []
         for model, name in (("turbo", "Official Turbo (BF16)"), ("q8", "Official Turbo (Q8 GGUF)")):
             source, reason = self._source(model)
             models.append({"id": model, "name": name, "available": source is not None, "reason": reason})
-        return {"models": models, "device": device, "gpu": gpu, "steps": 8,
-                "limits": {"batch": 8, "count": 64, "references": 10,
-                           "width": 4096, "height": 4096, "resolution": 4096}, "residency": "phase"}
+        return {"models": models, "device": device, "gpu": gpu, "memory": _system_memory(),
+                "steps": 8, "limits": {"batch": 8, "count": 64, "references": 10,
+                                       "width": 4096, "height": 4096, "resolution": 4096},
+                "residency": "phase"}
 
     def _load_pipeline(self, source, model, device):
         # Optional GGUF CUDA kernels can download executable code; this engine is local-only.
