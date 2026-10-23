@@ -44,13 +44,9 @@ h1, h2, h3, p { margin: 0; }
 .icon-library { position: absolute; width: 0; height: 0; overflow: hidden; }
 .icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
 
-.topbar { height: 56px; display: flex; align-items: center; padding: 0 24px; border-bottom: 1px solid var(--line); gap: 20px; background: var(--panel); }
-.service-state { font-size: 13px; color: var(--muted); min-width: 0; }
-.header-right { margin-left: auto; display: flex; gap: 10px; align-items: center; color: var(--muted); font: 12px var(--mono); letter-spacing: .5px; }
 .local-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .local-dot.connected { background: var(--accent); }
-.header-right .button { margin-left: 14px; letter-spacing: 0; }
-.app-shell { display: flex; min-height: calc(100dvh - 56px); }
+.app-shell { display: flex; min-height: 100dvh; }
 .rail { width: 88px; flex-shrink: 0; border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 18px 9px; background: var(--panel); }
 .rail-monitor { width: 100%; display: flex; flex-direction: column; gap: 16px; }
 .rail-metric { --metric: var(--accent); display: flex; flex-direction: column; gap: 6px; color: var(--metric); }
@@ -63,17 +59,10 @@ h1, h2, h3, p { margin: 0; }
 .rail-chart stop:last-child { stop-color: var(--metric); stop-opacity: .04; }
 .rail-chart-area { stroke: none; }
 .rail-chart-line { fill: none; stroke: var(--metric); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.rail-bottom { margin-top: auto; color: var(--muted); font: 12px var(--mono); }
+.rail-connection { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--muted); font: 10px var(--mono); letter-spacing: .2px; text-align: center; }
+.rail-bottom { margin-top: 10px; color: var(--muted); font: 12px var(--mono); }
 .workspace { flex: 1; min-width: 0; padding: 20px 24px 16px; display: flex; flex-direction: column; }
-.workspace-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; flex-shrink: 0; }
-.workspace-heading > div { min-width: 0; max-width: 100%; }
-.eyebrow { color: var(--muted); font: 12px/1.5 var(--mono); letter-spacing: .5px; margin-bottom: 7px; overflow-wrap: anywhere; }
-h1 { font-size: 20px; font-weight: 600; letter-spacing: 0; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; border-radius: 6px; font-size: 16px; border: 1px solid transparent; transition: background .15s, transform .15s; min-height: 44px; }
-.button.secondary { background: var(--panel); border-color: var(--line-strong); }
-.button.secondary:hover { background: var(--surface); }
-.button.compact { padding: 0 16px; min-height: 42px; font-size: 14px; }
-.button.compact .icon { width: 18px; height: 18px; }
 .studio-grid { display: grid; grid-template-columns: clamp(480px, 34vw, 640px) minmax(0, 1fr); gap: 24px; align-items: stretch; min-height: 0; flex: 1; }
 .control-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
 .control-scroll { min-height: 0; flex: 1; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
@@ -292,7 +281,7 @@ dialog > p { font-size: 14px; text-align: center; margin-top: 14px; color: var(-
 /* Desktop panels use the available viewport, with an always-visible action bar. */
 @media (min-width: 1100px) {
   body { height: 100dvh; overflow: hidden; }
-  .app-shell { height: calc(100dvh - 56px); min-height: 0; }
+  .app-shell { height: 100dvh; min-height: 0; }
   .control-scroll, .preview-panel { overflow-y: auto; }
 }
 
@@ -318,18 +307,12 @@ dialog > p { font-size: 14px; text-align: center; margin-top: 14px; color: var(-
   .rail { display: none; }
   .workspace { padding: 24px 24px 20px; }
   .studio-grid { grid-template-columns: 1fr; gap: 28px; }
-  .header-right { font-size: 0; gap: 0; }
-  .header-right .local-dot { display: none; }
   .canvas { flex: none; height: min(75vw, 720px); }
   .preview-footnote > span:last-child { display: none; }
 }
 
 @media (max-width: 700px) {
-  .topbar { padding: 0 16px; gap: 12px; }
-  .header-right .button { margin-left: 0; }
   .workspace { padding: 20px 16px 20px; }
-  .workspace-heading { gap: 10px; flex-wrap: wrap; }
-  .button.compact { padding: 0 12px; font-size: 14px; }
   .preview-subtitle { display: none; }
   .preview-details { grid-template-columns: 1fr; }
   .sample-tag { font-size: 12px; }
@@ -347,8 +330,6 @@ dialog > p { font-size: 14px; text-align: center; margin-top: 14px; color: var(-
 
 @media (max-width: 480px) {
   .workspace { padding: 20px 12px 20px; }
-  .workspace-heading .button { font-size: 13px; padding: 0 10px; gap: 6px; }
-  .workspace-heading .button .icon { width: 16px; height: 16px; }
   .prompt-section, .phase-section, .output-section, .generate-footer { padding-left: 16px; padding-right: 16px; }
   .micro-label { display: none; }
   .strategy-options { gap: 8px; }
@@ -385,7 +366,6 @@ dialog > p { font-size: 14px; text-align: center; margin-top: 14px; color: var(-
 }
 
 @media (max-width: 360px) {
-  .workspace-heading { align-items: flex-start; }
   .model-top { align-items: flex-start; }
   .model-top strong { max-width: 90px; }
   .seed-input { width: 160px; }

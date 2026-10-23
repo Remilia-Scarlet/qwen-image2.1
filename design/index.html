@@ -23,16 +23,10 @@
     <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M3 6h3c5 0 7 12 12 12h3m-4-4 4 4-4 4M3 18h3c2 0 3-2 5-5m2-2c2-3 3-5 5-5h3m-4-4 4 4-4 4"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></symbol>
-    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
     <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></symbol>
     <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 1 2.6 6.1"/><path d="M3 7.5V12h4.5"/><path d="M12 8v4.5l3 1.8"/></symbol>
   </svg>
-
-  <header class="topbar">
-    <span class="service-state" id="service-state">正在连接本地服务</span>
-    <div class="header-right"><span class="local-dot" id="connection-dot"></span><span id="connection-label">CONNECTING</span><button type="button" class="button secondary compact" id="toggle-fullscreen"><svg class="icon"><use href="#i-expand"/></svg><span>全屏</span></button></div>
-  </header>
 
   <div class="app-shell">
     <aside class="rail" aria-label="电脑状态">
@@ -62,15 +56,14 @@
           </svg>
         </div>
       </div>
+      <div class="rail-connection">
+        <span class="local-dot" id="connection-dot"></span>
+        <span id="connection-label">CONNECTING</span>
+      </div>
       <span class="rail-bottom">V.03</span>
     </aside>
 
     <main class="workspace">
-      <div class="workspace-heading">
-        <div><p class="eyebrow">INFERENCE / CONFIGURATION</p><h1>生图控制台</h1></div>
-        <button type="button" class="button secondary compact" id="export-config"><svg class="icon"><use href="#i-copy"/></svg>导出配置</button>
-      </div>
-
       <div class="studio-grid">
         <form class="control-panel" id="generation-form">
           <div class="control-scroll">

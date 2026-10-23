@@ -89,7 +89,6 @@ function availability() {
     message = `${model?.reason || "所选模型权重未就绪"}。请检查 ${script}，本页面不会自动下载或切换模型。`;
   } else if (service.device === "unavailable") message = "服务已连接，但推理设备不可用，请检查服务日志。";
   else message = "本地推理 · 生成过程中可请求停止";
-  $("service-state").textContent = !connected ? "本地服务未连接" : ready ? "本地服务已连接 · 模型就绪" : "本地服务已连接 · 推理未就绪";
   $("generation-help").textContent = running ? (jobId ? "停止请求需等待后端安全结束当前操作" : "正在准备请求或确认服务任务") : message;
   $("generation-help").classList.toggle("error", !running && !ready);
   $("generate-button").disabled = running ? !jobId || cancelPending || cancelRequested : !ready;
@@ -469,18 +468,6 @@ function encodeFile(file) {
   });
 }
 
-$("export-config").addEventListener("click", () => {
-  updateConfiguration();
-  if (!form.reportValidity()) return;
-  const url = URL.createObjectURL(new Blob([JSON.stringify(configuration(), null, 2)], { type: "application/json" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "qwen-image-config.json";
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  notify("已导出配置；参考图仅记录文件名，不包含图片数据。");
-});
-
 const trackPhases = ["loading", "encoding", "reference_encoding", "denoising", "decoding"];
 const trackTitles = { loading: "权重加载", encoding: "文本编码", reference_encoding: "参考图编码", denoising: "8 步迭代", decoding: "VAE 解码" };
 let trackHasReferences = null;
@@ -794,7 +781,6 @@ function lock(locked) {
   for (const control of form.querySelectorAll("input, select, textarea, button")) {
     if (control !== $("generate-button")) control.disabled = locked;
   }
-  $("export-config").disabled = locked;
   $("generate-button").type = locked ? "button" : "submit";
   $("generate-button").querySelector("span").textContent = locked ? "停止生成" : "开始生成";
   if (!locked) updateConfiguration();
@@ -1045,17 +1031,6 @@ document.addEventListener("keydown", (event) => {
 });
 
 $("expand-preview").addEventListener("click", () => { if (selectedImage) $("preview-dialog").showModal(); });
-$("toggle-fullscreen").addEventListener("click", async () => {
-  try {
-    if (document.fullscreenElement) await document.exitFullscreen();
-    else await document.documentElement.requestFullscreen();
-  } catch {
-    notify("浏览器未允许全屏，可以按 F11 切换。");
-  }
-});
-document.addEventListener("fullscreenchange", () => {
-  $("toggle-fullscreen").querySelector("span").textContent = document.fullscreenElement ? "退出全屏" : "全屏";
-});
 $("close-preview").addEventListener("click", () => $("preview-dialog").close());
 $("preview-dialog").addEventListener("click", (event) => {
   if (event.target !== $("preview-dialog")) return;
